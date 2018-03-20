@@ -1,5 +1,8 @@
 import angr
+from angr.utils.strings import load_expected_string
+
 from angr.sim_type import SimTypeString, SimTypeInt
+import claripy
 
 import logging
 l = logging.getLogger("angr.procedures.libc.strcmp")
@@ -12,11 +15,7 @@ class strcmp(angr.SimProcedure):
                        1: self.ty_ptr(SimTypeString())}
         self.return_type = SimTypeInt(32, True)
 
-        strlen = angr.SIM_PROCEDURES['libc']['strlen']
+        str_a = load_expected_string(self.state, a_addr)
+        str_b = load_expected_string(self.state, b_addr)
 
-        a_strlen = self.inline_call(strlen, a_addr)
-        b_strlen = self.inline_call(strlen, b_addr)
-        maxlen = self.state.se.BVV(max(a_strlen.max_null_index, b_strlen.max_null_index), self.state.arch.bits)
-
-        strncmp = self.inline_call(angr.SIM_PROCEDURES['libc']['strncmp'], a_addr, b_addr, maxlen, a_len=a_strlen, b_len=b_strlen)
-        return strncmp.ret_expr
+        return claripy.If(str_a == str_b, claripy.BVV(0, self.state.arch.bits), claripy.BVV(1, self.state.arch.bits))
