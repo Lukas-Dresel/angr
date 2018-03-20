@@ -265,7 +265,9 @@ class SimSolver(SimStatePlugin):
 
         track = o.CONSTRAINT_TRACKING_IN_SOLVER in self.state.options
 
-        if o.ABSTRACT_SOLVER in self.state.options:
+        if o.STRINGS_ANALYSIS in self.state.options:
+            self._stored_solver = claripy.SolverSMT_CVC4()
+        elif o.ABSTRACT_SOLVER in self.state.options:
             self._stored_solver = claripy.SolverVSA()
         elif o.REPLACEMENT_SOLVER in self.state.options:
             self._stored_solver = claripy.SolverReplacement(auto_replace=False)

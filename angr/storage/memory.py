@@ -399,6 +399,8 @@ class SimMemory(SimStatePlugin):
         elif type(data_e) in (int, long):
             data_e = self.state.se.BVV(data_e, size_e*self.state.arch.byte_width if size_e is not None
                                        else self.state.arch.bits)
+        elif type(data_e) == claripy.String:
+            return data_e
         else:
             data_e = data_e.raw_to_bv()
 
