@@ -2,7 +2,7 @@ import angr
 
 import unittest
 
-from claripy import StringS
+from claripy import StringS, Substr, StringV
 
 from claripy import frontend_mixins, frontends, backend_manager, backends
 from claripy.backends import BackendSMT_CVC4
@@ -52,13 +52,19 @@ class TestStringOperation(unittest.TestCase):
 
         s, symbolic_input = make_symbolic_state(proj)
 
+        username = 'lukas'
+        s.solver.add(Substr(0, len(username), symbolic_input) == StringV(username))
+
+        symbolic_file = StringS('file', 1000)
+        fd = s.posix.open('lukas', 0)
+        s.posix.files[fd].content.store(0, symbolic_file)
+
         sm = proj.factory.simulation_manager(s, save_unsat=True)
         run_to_completion(sm)
 
         states = [s for s in sm.deadended if 'Welcome to the admin console, trusted user!\n' in s.posix.dumps(1)]
 
-        for st in states:
-            print st.solver.eval_upto(symbolic_input, 10)
+        self.assertTrue('SOSNEAKY' in states[0].solver.eval_one(symbolic_input))
 
 
 if __name__ == "__main__":
