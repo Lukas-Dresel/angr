@@ -1,13 +1,14 @@
 import angr
+from angr import SimProcedure
+from angr.procedures.string_simprocs import StringSimProcedureMixin
 from angr.sim_type import SimTypeString, SimTypeInt, SimTypeFd
 
 ######################################
 # open
 ######################################
-from angr.utils.strings import try_load_as_string
 
 
-class open(angr.SimProcedure): #pylint:disable=W0622
+class open(SimProcedure, StringSimProcedureMixin): #pylint:disable=W0622
     #pylint:disable=arguments-differ
 
     def run(self, p_addr, flags):
@@ -15,7 +16,7 @@ class open(angr.SimProcedure): #pylint:disable=W0622
                                1: SimTypeInt(32, True)}
         self.return_type = SimTypeFd()
 
-        string = try_load_as_string(self.state, p_addr)
+        string = self.try_load_string(p_addr)
         if string is not None:
             path = self.state.se.eval(string)
 

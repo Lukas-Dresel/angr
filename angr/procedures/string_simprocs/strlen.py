@@ -1,15 +1,15 @@
 import claripy
 import angr
+from angr import SimProcedure
+from angr.procedures.string_simprocs import StringSimProcedureMixin
 
 from angr.sim_type import SimTypeString, SimTypeLength
 
 import logging
 
-from angr.utils.strings import try_load_as_string
-
 l = logging.getLogger("angr.procedures.libc.strlen")
 
-class strlen(angr.SimProcedure):
+class strlen(SimProcedure, StringSimProcedureMixin):
     #pylint:disable=arguments-differ
 
     def run(self, s_addr):
@@ -18,7 +18,7 @@ class strlen(angr.SimProcedure):
         self.argument_types = {0: self.ty_ptr(SimTypeString())}
         self.return_type = SimTypeLength(self.state.arch)
 
-        string = try_load_as_string(self.state, s_addr)
+        string = self.try_load_string(s_addr)
         if string is not None:
             return claripy.StrLen(string, self.state.arch.bits)
         else:

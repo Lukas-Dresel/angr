@@ -1,4 +1,5 @@
-import angr
+from angr import SimProcedure
+from angr.procedures.string_simprocs import StringSimProcedureMixin
 from angr.sim_type import SimTypeString
 
 import logging
@@ -8,7 +9,7 @@ from claripy import StrIndexOf
 
 l = logging.getLogger("angr.procedures.libc.strstr")
 
-class strstr(angr.SimProcedure):
+class strstr(SimProcedure, StringSimProcedureMixin):
     #pylint:disable=arguments-differ
 
     def run(self, haystack_addr, needle_addr, haystack_strlen=None, needle_strlen=None):
@@ -16,6 +17,6 @@ class strstr(angr.SimProcedure):
                                 1: self.ty_ptr(SimTypeString())}
         self.return_type = self.ty_ptr(SimTypeString())
 
-        str_haystack = load_expected_string(self.state, haystack_addr)
-        str_needle = load_expected_string(self.state, needle_addr)
+        str_haystack = self.load_expected_string(haystack_addr)
+        str_needle = self.load_expected_string(needle_addr)
         return StrIndexOf(str_haystack, str_needle, self.state.arch.bits)
