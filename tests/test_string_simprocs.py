@@ -1,5 +1,7 @@
 import angr
 
+import ipdb
+
 import unittest
 
 from claripy import StringS, Substr, StringV
@@ -63,8 +65,16 @@ class TestStringOperation(unittest.TestCase):
         run_to_completion(sm)
 
         states = [s for s in sm.deadended if 'Welcome to the admin console, trusted user!\n' in s.posix.dumps(1)]
+        self.assertTrue('SOSNEAKY' in states[0].solver.eval(symbolic_input))
 
-        self.assertTrue('SOSNEAKY' in states[0].solver.eval_one(symbolic_input))
+    def test_angr_is_kill_strings(self):
+        proj = setup_project('../../binaries/tests/i386/test_string_simprocs_angr_is_kill')
+
+        s, symbolic_input = make_symbolic_state(proj)
+
+        sm = proj.factory.simulation_manager(s)
+        run_to_completion(sm)
+
 
 
 if __name__ == "__main__":

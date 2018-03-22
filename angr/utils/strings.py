@@ -51,14 +51,13 @@ def do_load_binary_search(state, addr, stop_point):
 
 def try_load_as_string(state, addr):
     first_char = state.memory.load(addr, 1)
-    first_guessed_val = first_char.args[2] if first_char.op == 'Substr' else first_char
     if type(first_char) == String:
         length = do_load_binary_search(state, addr, stop_no_string)
         string_val = state.memory.load(addr, length)
         return string_val
     elif type(first_char) == BV and not first_char.symbolic:
         strlen = do_load_binary_search(state, addr, stop_symbolic_or_null_byte)
-        string_val = state.solver.eval_one(state.memory.load(addr, strlen + 1), cast_to=str)
+        string_val = state.solver.eval_one(state.memory.load(addr, strlen), cast_to=str)
         return StringV(string_val)
     else:
         return None
