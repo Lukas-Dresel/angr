@@ -37,6 +37,7 @@ class SimProcedure(object):
         num_args=None, display_name=None, library_name=None,
         is_function=None, **kwargs
     ):
+        super(SimProcedure, self).__init__()
         # WE'LL FIGURE IT OUT
         self.project = project
         self.arch = project.arch if project is not None else None
