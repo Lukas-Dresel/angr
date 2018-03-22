@@ -1,23 +1,27 @@
 import angr
 import time
+import sys
 
 from claripy import Substr, StringV
 from strings_helper import *
 from eval_utils import dump_sm_stats
 
 
-proj = setup_project('../../../binaries/tests/i386/test_string_simprocs_simple')
+proj = setup_project(sys.argv[1])
 
 s, symbolic_input = make_symbolic_state(proj)
 
-sm = proj.factory.simulation_manager(s, save_unsat=False)
+sm = proj.factory.simulation_manager(s, save_unsat=True)
 
 start = time.time()
 run_to_completion(sm)
 end_exploration = time.time()
 
-states = [s for s in sm.deadended if 'Wow' in s.posix.dumps(1)]
-print repr(states[0].solver.eval(symbolic_input))
+io = [(s.solver.eval(symbolic_input), s.posix.dumps(1)) for s in sm.deadended]
+for inp, outp in io:
+    print "In:  ", repr(inp)
+    print "Out: ", repr(outp)
+
 end_eval = time.time()
 dump_sm_stats(sm)
 
