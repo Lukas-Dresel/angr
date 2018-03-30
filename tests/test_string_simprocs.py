@@ -1,16 +1,13 @@
 import angr
+import claripy
 
 import ipdb
 
 import unittest
 
-from claripy import StringS, Substr, StringV
+from claripy import StringS, StrSubstr, StringV
 
 from claripy import frontend_mixins, frontends, backend_manager, backends
-from claripy.backends import BackendSMT_CVC4
-
-# prep the backend for the solver to use!
-backend_smt_cvc4 = backend_manager.backends._register_backend(BackendSMT_CVC4(), 'smt_cvc4', False, False)
 
 def setup_project(binary):
     proj = angr.Project(binary, auto_load_libs=False)
@@ -55,7 +52,7 @@ class TestStringOperation(unittest.TestCase):
         s, symbolic_input = make_symbolic_state(proj)
 
         username = 'lukas'
-        s.solver.add(Substr(0, len(username), symbolic_input) == StringV(username))
+        s.solver.add(StrSubstr(0, len(username), symbolic_input) == StringV(username))
 
         symbolic_file = StringS('file', 1000)
         fd = s.posix.open('lukas', 0)
@@ -74,7 +71,6 @@ class TestStringOperation(unittest.TestCase):
 
         sm = proj.factory.simulation_manager(s)
         run_to_completion(sm)
-
 
 
 if __name__ == "__main__":
