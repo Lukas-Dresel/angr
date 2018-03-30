@@ -1,7 +1,7 @@
 import angr
 import time
 
-from claripy import Substr, StringV
+from claripy import StrSubstr, StringV
 from strings_helper import *
 from eval_utils import dump_sm_stats
 
@@ -11,7 +11,7 @@ proj = setup_project('../../../binaries/tests/i386/fauxware')
 s, symbolic_input = make_symbolic_state(proj)
 
 username = 'lukas'
-s.solver.add(Substr(0, len(username), symbolic_input) == StringV(username))
+s.solver.add(StrSubstr(0, len(username), symbolic_input) == StringV(username))
 
 symbolic_file = StringS('file', 1000)
 fd = s.posix.open('lukas', 0)

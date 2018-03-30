@@ -1,10 +1,10 @@
 
 # prep the backend for the solver to use!
 import angr
+import claripy
 from claripy import backend_manager, StringS
-from claripy.backends import BackendSMT_CVC4
 
-backend_smt_cvc4 = backend_manager.backends._register_backend(BackendSMT_CVC4(), 'smt_cvc4', False, False)
+backend_smt_cvc4 = backend_manager.backends.smtlib_cvc4
 
 def setup_project(binary):
     proj = angr.Project(binary, auto_load_libs=False)
@@ -19,6 +19,7 @@ def setup_project(binary):
 
 def make_symbolic_state(proj):
     s = proj.factory.full_init_state(add_options={angr.options.STRINGS_ANALYSIS})
+    s.solver._stored_solver = claripy.SolverStrings(backend_smt_cvc4)
     symbolic_input = StringS('input', 1000)
     s.posix.files[0].content.store(0, symbolic_input)
     return s, symbolic_input
