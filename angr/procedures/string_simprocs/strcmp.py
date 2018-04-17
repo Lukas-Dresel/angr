@@ -15,9 +15,7 @@ class strcmp(SimProcedure, StringSimProcedureMixin):
                        1: self.ty_ptr(SimTypeString())}
         self.return_type = SimTypeInt(32, True)
 
-
+        #import ipdb; ipdb.set_trace()
         str_a = self.load_expected_string(a_addr)
         str_b = self.load_expected_string(b_addr)
-        # import ipdb; ipdb.set_trace()
-
         return claripy.If(str_a == str_b, claripy.BVV(0, self.state.arch.bits), claripy.BVV(1, self.state.arch.bits))

@@ -1,13 +1,8 @@
 import angr
-import claripy
-
-import ipdb
 
 import unittest
 
 from claripy import StringS, StrSubstr, StringV
-
-from claripy import frontend_mixins, frontends, backend_manager, backends
 
 def setup_project(binary):
     proj = angr.Project(binary, auto_load_libs=False)

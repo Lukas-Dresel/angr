@@ -3,8 +3,9 @@
 import angr
 import claripy
 from claripy import backend_manager, StringS
+from claripy.backends.backend_smtlib_solvers.cvc4_popen import SolverBackendCVC4
 
-backend_smt_cvc4 = backend_manager.backends.smtlib_cvc4
+backend_smt_cvc4 = SolverBackendCVC4(daggify=True, smt_script_log_dir='/tmp/smtlib_str_scripts')
 
 def setup_project(binary):
     proj = angr.Project(binary, auto_load_libs=False)
