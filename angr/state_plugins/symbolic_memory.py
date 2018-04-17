@@ -753,8 +753,8 @@ class SimSymbolicMemory(SimMemory): #pylint:disable=abstract-method
     def _store_fully_concrete(self, address, size, data, endness, condition):
         if type(size) not in (int, long):
             size = self.state.solver.eval(size)
-        if size < data.length//self.state.arch.byte_width:
-            data = data[size*self.state.arch.byte_width-1:]
+        if size < (data.length // self.state.arch.byte_width):
+            data = data[data.length - 1:data.length - size*self.state.arch.byte_width]
         if condition is not None:
             try:
                 original_value = self._read_from(address, size)
