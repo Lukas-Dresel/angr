@@ -486,6 +486,10 @@ class SimStateSystem(SimStatePlugin):
             self.open("tmp_%d" % fd, Flags.O_RDWR, preferred_fd=fd)
         return self.files[fd]
 
+    def get_next_available_fd(self):
+        sorted_fd = sorted(map(int, self.files.keys()))
+        return sorted_fd[-1] + 1
+
     def _chrootize(self, name):
         """
         take a path and make sure if fits within the chroot

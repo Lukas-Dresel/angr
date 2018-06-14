@@ -19,4 +19,4 @@ class strstr(SimProcedure, StringSimProcedureMixin):
 
         str_haystack = self.load_expected_string(haystack_addr)
         str_needle = self.load_expected_string(needle_addr)
-        return StrIndexOf(str_haystack, str_needle, self.state.arch.bits)
+        return StrIndexOf(str_haystack, str_needle, 0, self.state.arch.bits)

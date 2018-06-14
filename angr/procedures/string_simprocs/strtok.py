@@ -42,7 +42,6 @@ class strtok(SimProcedure, StringSimProcedureMixin):
 
         self.state.globals['strtok_len_already_processed'] = new_index + 1
 
-        import ipdb; ipdb.set_trace()
         result_mem_ptr = self.alloc_string_memory(current_token.string_length)
         self.state.memory.store(result_mem_ptr, current_token)
 
