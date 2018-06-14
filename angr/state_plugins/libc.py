@@ -186,11 +186,11 @@ class SimStateLibc(SimStatePlugin):
         # various thresholds
         self.heap_location = HEAP_LOCATION
         self.mmap_base = HEAP_LOCATION + HEAP_SIZE * 2
-        self.buf_symbolic_bytes = 60
+        self.buf_symbolic_bytes = 6000
         self.max_symbolic_strstr = 1
         self.max_symbolic_strchr = 16
         self.max_variable_size = 128
-        self.max_str_len = 128
+        self.max_str_len = 10000
         self.max_buffer_size = 48
         self.max_strtol_len = 11 # len(str(2**31)) + 1
         self.max_memcpy_size = 4096

@@ -13,8 +13,8 @@ def setup_project(binary):
     for name, simproc in angr.SIM_PROCEDURES['string_simprocs'].iteritems():
         proj.hook_symbol(name, simproc(), replace=True)
 
-    for name, simproc in angr.SIM_PROCEDURES['cgc_strings'].iteritems():
-        proj.hook_symbol(name, simproc(), replace=True)
+    #for name, simproc in angr.SIM_PROCEDURES['cgc_strings'].iteritems():
+    #    proj.hook_symbol(name, simproc(), replace=True)
 
     return proj
 
