@@ -1,4 +1,3 @@
-import claripy
 from angr import SimProcedure
 from angr.procedures.string_simprocs import StringSimProcedureMixin
 from angr.sim_type import SimTypeString
@@ -6,7 +5,7 @@ from angr.sim_type import SimTypeString
 import logging
 
 from angr.utils.strings import load_expected_string
-from claripy import StrIndexOf, StrSubstr, StrLen, StrConcat
+from claripy import StrIndexOf, StrSubstr, StrLen , If, BVV
 
 l = logging.getLogger("angr.procedures.libc.strtok")
 
@@ -29,7 +28,7 @@ class strtok(SimProcedure, StringSimProcedureMixin):
 
         if haystack != 0:
             str_haystack = self.load_expected_string(haystack)
-            str_len_processed = claripy.BVV(0, self.state.arch.bits)
+            str_len_processed = BVV(0, self.state.arch.bits)
             self.state.globals['strtok_tokenized_string'] = str_haystack
             self.state.globals['strtok_len_already_processed'] = str_len_processed
 
@@ -45,11 +44,4 @@ class strtok(SimProcedure, StringSimProcedureMixin):
         result_mem_ptr = self.alloc_string_memory(current_token.string_length)
         self.state.memory.store(result_mem_ptr, current_token)
 
-        empty_str = claripy.StringV("\x00")
-        empty_str_ptr = self.alloc_string_memory(empty_str.string_length)
-        self.state.memory.store(empty_str_ptr, empty_str)
-
-        # return claripy.If(new_index >= 0, result_mem_ptr, claripy.BVV(0, self.state.arch.bits))
-        return claripy.If(new_index >= 0,
-                          claripy.BVV(result_mem_ptr, self.state.arch.bits),
-                          claripy.BVV(empty_str_ptr, self.state.arch.bits))
+        return If(new_index >= 0, result_mem_ptr, BVV(0, self.state.arch.bits))

@@ -4,8 +4,7 @@ from angr.sim_type import SimTypeString
 
 import logging
 
-from angr.utils.strings import load_expected_string
-from claripy import StrIndexOf
+from claripy import StrIndexOf, StrSubstr, If, BVV
 
 l = logging.getLogger("angr.procedures.libc.strstr")
 
@@ -19,4 +18,11 @@ class strstr(SimProcedure, StringSimProcedureMixin):
 
         str_haystack = self.load_expected_string(haystack_addr)
         str_needle = self.load_expected_string(needle_addr)
-        return StrIndexOf(str_haystack, str_needle, 0, self.state.arch.bits)
+
+        index = StrIndexOf(str_haystack, str_needle, 0, self.state.arch.bits)
+        substr = StrSubstr(index, str_haystack.string_length, str_haystack)
+
+        substr_ptr = self.alloc_string_memory(substr.string_length)
+        self.state.memory.store(substr_ptr, substr)
+
+        return If(index >= 0, substr_ptr, BVV(0, self.state.arch.bits))
