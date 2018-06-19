@@ -45,4 +45,11 @@ class strtok(SimProcedure, StringSimProcedureMixin):
         result_mem_ptr = self.alloc_string_memory(current_token.string_length)
         self.state.memory.store(result_mem_ptr, current_token)
 
-        return claripy.If(new_index >= 0, result_mem_ptr, claripy.BVV(0, self.state.arch.bits))
+        empty_str = claripy.StringV("\x00")
+        empty_str_ptr = self.alloc_string_memory(empty_str.string_length)
+        self.state.memory.store(empty_str_ptr, empty_str)
+
+        # return claripy.If(new_index >= 0, result_mem_ptr, claripy.BVV(0, self.state.arch.bits))
+        return claripy.If(new_index >= 0,
+                          claripy.BVV(result_mem_ptr, self.state.arch.bits),
+                          claripy.BVV(empty_str_ptr, self.state.arch.bits))
