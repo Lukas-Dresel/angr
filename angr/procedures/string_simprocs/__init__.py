@@ -1,25 +1,36 @@
+from mmap import PROT_WRITE, PROT_READ
+
 import claripy
+from angr.errors import SimSegfaultError
 from angr.utils.strings import try_load_as_string, load_expected_string
+
+NEXT_STRING_ALLOC_STATE_GLOBALS_KEY = 'next_string_alloc_addr'
+
+def get_next_string_alloc_addr(state, string_memory_base=0xdead0000):
+    if state is None or NEXT_STRING_ALLOC_STATE_GLOBALS_KEY not in state.globals:
+        return string_memory_base
+    return state.globals[NEXT_STRING_ALLOC_STATE_GLOBALS_KEY]
+
+def set_next_string_alloc_addr(state, x):
+    state.globals[NEXT_STRING_ALLOC_STATE_GLOBALS_KEY] = x
+
+def alloc_string_memory(state, length, **kwargs):
+    ptr = get_next_string_alloc_addr(state, **kwargs)
+    try:
+        state.memory.store(ptr, claripy.BVV(0, (length + 1) * 8))
+    except SimSegfaultError as ex:
+        # raise
+        # import ipdb; ipdb.set_trace()
+        state.memory.map_region(ptr, length, PROT_READ | PROT_WRITE, init_zero=True)
+
+    set_next_string_alloc_addr(state, ptr + (length + 1))
+    return ptr
 
 class StringSimProcedureMixin(object):
     def __init__(self, *args, **kwargs):
         self.string_memory_base = kwargs.pop('string_memory_base', 0xdead0000)
-        self.string_memory_size = kwargs.pop('string_memory_size', 0x100000)
+        self.string_memory_size = kwargs.pop('string_memory_size', 0x100000) #TODO: Is this actually needed for anything?
         super(StringSimProcedureMixin, self).__init__(*args, **kwargs)
-
-    @property
-    def next_string_alloc_addr(self):
-        return self.state.globals.get('next_string_alloc_addr', self.string_memory_base) if self.state is not None else self.string_memory_base
-
-    @next_string_alloc_addr.setter
-    def next_string_alloc_addr(self, x):
-        self.state.globals['next_string_alloc_addr'] = x
-
-    def alloc_string_memory(self, length):
-        ptr = self.next_string_alloc_addr
-        self.state.memory.store(ptr, claripy.BVV(0, (length + 1) * 8))
-        self.next_string_alloc_addr += (length + 1)
-        return ptr
 
     def try_load_string(self, p):
         return try_load_as_string(self.state, p)
@@ -27,3 +38,8 @@ class StringSimProcedureMixin(object):
     def load_expected_string(self, p):
         return load_expected_string(self.state, p)
 
+    def alloc_string_memory(self, length):
+        alloc_string_memory(self.state,
+                            length,
+                            string_memory_base=self.string_memory_base,
+                            string_memory_size=self.string_memory_size)
