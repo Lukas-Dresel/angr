@@ -2,6 +2,7 @@ from mmap import PROT_WRITE, PROT_READ
 
 import claripy
 from angr.errors import SimSegfaultError
+from angr.state_plugins import SimActionConstraint, sim_options, SimActionExit
 from angr.utils.strings import try_load_as_string, load_expected_string
 
 NEXT_STRING_ALLOC_STATE_GLOBALS_KEY = 'next_string_alloc_addr'
@@ -43,3 +44,16 @@ class StringSimProcedureMixin(object):
                             length,
                             string_memory_base=self.string_memory_base,
                             string_memory_size=self.string_memory_size)
+
+    def constrain(self, state, constraint):
+        state.add_constraints(constraint)
+        state.history.add_action(SimActionConstraint(state, constraint))
+
+    def add_ret_successor(self, state, return_val):
+        ret_addr = self.cc.teardown_callsite(state, return_val,
+                                             arg_types=[False] * self.num_args if self.cc.args is None else None)
+
+        if sim_options.TRACK_JMP_ACTIONS in state.options:
+            state.history.add_action(SimActionExit(state, ret_addr))
+
+        self.successors.add_successor(state, ret_addr, self.state.solver.true, 'Ijk_Ret')

@@ -42,31 +42,21 @@ class strtok(SimProcedure, StringSimProcedureMixin):
 
         new_index = StrIndexOf(string_to_tokenize, str_needle, current_start_idx, self.state.arch.bits)
 
+
         # State where it wasn't found.
         failed_state = self.state.copy()
         self.constrain(failed_state, new_index < 0)
-        self.add_ret_successor(failed_state, claripy.BVV(0, self.state.arch.bits))
+        self.add_ret_successor(failed_state, claripy.BVV(0, failed_state.arch.bits))
+
 
         success_state = self.state.copy()
 
         current_token = StrSubstr(current_start_idx, new_index, string_to_tokenize)
 
         success_state.globals['strtok_len_already_processed'] = new_index + 1
-        result_mem_ptr = alloc_string_memory(self.state, current_token.string_length)
-        self.state.memory.store(result_mem_ptr, current_token)
+        result_mem_ptr = alloc_string_memory(success_state, current_token.string_length)
+        success_state.memory.store(result_mem_ptr, current_token)
 
         self.constrain(success_state, new_index >= 0)
-        self.add_ret_successor(success_state, claripy.BVV(result_mem_ptr, self.state.arch.bits))
+        self.add_ret_successor(success_state, claripy.BVV(result_mem_ptr, success_state.arch.bits))
 
-    def constrain(self, state, constraint):
-        state.add_constraints(constraint)
-        state.history.add_action(SimActionConstraint(state, constraint))
-
-    def add_ret_successor(self, state, return_val):
-        ret_addr = self.cc.teardown_callsite(self.state, return_val,
-                                             arg_types=[False] * self.num_args if self.cc.args is None else None)
-
-        if sim_options.TRACK_JMP_ACTIONS in state.options:
-            state.history.add_action(SimActionExit(state, ret_addr))
-
-        self.successors.add_successor(state, ret_addr, self.state.solver.true, 'Ijk_Ret')
