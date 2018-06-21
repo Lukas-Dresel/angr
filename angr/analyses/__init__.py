@@ -1,9 +1,8 @@
-from .analysis import Analysis
+from .analysis import Analysis, AnalysesHub
 from ..misc.ux import deprecated
 
-@deprecated('cls.register_default(name)')
 def register_analysis(cls, name):
-    cls.register_default(name)
+    AnalysesHub.register_default(name, cls)
 
 from .cfg import CFGFast, CFGAccurate, CFG, CFGArchOptions
 from .cdg import CDG
@@ -25,3 +24,5 @@ from .disassembly import Disassembly
 from .variable_recovery import VariableRecovery, VariableRecoveryFast
 from .identifier import Identifier
 from .callee_cleanup_finder import CalleeCleanupFinder
+from .reaching_definitions import ReachingDefinitionAnalysis
+from .calling_convention import CallingConventionAnalysis

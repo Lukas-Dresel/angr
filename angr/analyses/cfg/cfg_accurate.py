@@ -523,7 +523,7 @@ class CFGAccurate(ForwardAnalysis, CFGBase):    # pylint: disable=abstract-metho
                         # will lose some edges in this way, but in general it is acceptable.
                         new_dst.looping_times <= max_loop_unrolling_times):
                     # Log all successors of the dst node
-                    dst_successors = graph_copy.successors(dst)
+                    dst_successors = list(graph_copy.successors(dst))
                     # Add new_dst to the graph
                     edge_data = graph_copy.get_edge_data(src, dst)
                     graph_copy.add_edge(src, new_dst, **edge_data)
@@ -696,6 +696,7 @@ class CFGAccurate(ForwardAnalysis, CFGBase):    # pylint: disable=abstract-metho
         self._thumb_addrs = s['_thumb_addrs']
         self._unresolvable_runs = s['_unresolvable_runs']
         self._executable_address_ranges = s['_executable_address_ranges']
+        self._iropt_level = s['_iropt_level']
 
     def __getstate__(self):
         s = {
@@ -707,6 +708,7 @@ class CFGAccurate(ForwardAnalysis, CFGBase):    # pylint: disable=abstract-metho
             '_thumb_addrs': self._thumb_addrs,
             '_unresolvable_runs': self._unresolvable_runs,
             '_executable_address_ranges': self._executable_address_ranges,
+            '_iropt_level': self._iropt_level,
         }
 
         return s
@@ -1267,7 +1269,10 @@ class CFGAccurate(ForwardAnalysis, CFGBase):    # pylint: disable=abstract-metho
                                                   self._block_artifacts
                                                   )
 
-        # Ad additional edges supplied by the user
+        # Remove all successors whose IP is symbolic
+        successors = [ s for s in successors if not s.ip.symbolic ]
+
+        # Add additional edges supplied by the user
         successors = self._add_additional_edges(input_state, sim_successors, job.cfg_node, successors)
 
         # if base graph is used, add successors implied from the graph
@@ -1341,8 +1346,12 @@ class CFGAccurate(ForwardAnalysis, CFGBase):    # pylint: disable=abstract-metho
                                                                       )
 
             else:
-                # Well, there is just no successors. What can you expect?
-                pass
+                # There are no successors, but we still want to update the function graph
+                artifacts = job.sim_successors.artifacts
+                if 'irsb' in artifacts and 'insn_addrs' in artifacts and artifacts['insn_addrs']:
+                    the_irsb = artifacts['irsb']
+                    insn_addrs = artifacts['insn_addrs']
+                    self._handle_job_without_successors(job, the_irsb, insn_addrs)
 
         # TODO: replace it with a DDG-based function IO analysis
         # handle all actions
@@ -1758,6 +1767,41 @@ class CFGAccurate(ForwardAnalysis, CFGBase):    # pylint: disable=abstract-metho
 
         return [ pw ]
 
+    def _handle_job_without_successors(self, job, irsb, insn_addrs):
+        """
+        A block without successors should still be handled so it can be added to the function graph correctly.
+
+        :param CFGJob job:  The current job that do not have any successor.
+        :param IRSB irsb:   The related IRSB.
+        :param insn_addrs:  A list of instruction addresses of this IRSB.
+        :return: None
+        """
+
+        # it's not an empty block
+
+        # handle all conditional exits
+        ins_addr = job.addr
+        for stmt_idx, stmt in enumerate(irsb.statements):
+            if type(stmt) is pyvex.IRStmt.IMark:
+                ins_addr = stmt.addr + stmt.delta
+            elif type(stmt) is pyvex.IRStmt.Exit:
+                successor_jumpkind = stmt.jk
+                self._update_function_transition_graph(
+                    job.block_id, None,
+                    jumpkind = successor_jumpkind,
+                    ins_addr=ins_addr,
+                    stmt_idx=stmt_idx,
+                )
+
+        # handle the default exit
+        successor_jumpkind = irsb.jumpkind
+        successor_last_ins_addr = insn_addrs[-1]
+        self._update_function_transition_graph(job.block_id, None,
+                                               jumpkind=successor_jumpkind,
+                                               ins_addr=successor_last_ins_addr,
+                                               stmt_idx='default',
+                                               )
+
     # SimAction handling
 
     def _handle_actions(self, state, current_run, func, sp_addr, accessed_registers):
@@ -1784,7 +1828,7 @@ class CFGAccurate(ForwardAnalysis, CFGBase):    # pylint: disable=abstract-metho
                 if a.type == "mem" and a.action == "read":
                     try:
                         addr = se.eval_one(a.addr.ast, default=0)
-                    except claripy.ClaripyError:
+                    except (claripy.ClaripyError, SimSolverModeError):
                         continue
                     if (self.project.arch.call_pushes_ret and addr >= new_sp_addr) or \
                             (not self.project.arch.call_pushes_ret and addr >= new_sp_addr):
@@ -1892,10 +1936,22 @@ class CFGAccurate(ForwardAnalysis, CFGBase):    # pylint: disable=abstract-metho
         :return: None
         """
 
-        dst_node = self._graph_get_node(dst_node_key, terminator_for_nonexistent_node=True)
+        if dst_node_key is not None:
+            dst_node = self._graph_get_node(dst_node_key, terminator_for_nonexistent_node=True)
+            dst_node_addr = dst_node.addr
+            dst_codenode = dst_node.to_codenode()
+            dst_node_func_addr = dst_node.function_address
+        else:
+            dst_node = None
+            dst_node_addr = None
+            dst_codenode = None
+            dst_node_func_addr = None
+
         if src_node_key is None:
+            if dst_node is None:
+                raise ValueError("Either src_node_key or dst_node_key must be specified.")
             self.kb.functions.function(dst_node.function_address, create=True)._register_nodes(True,
-                                                                                               dst_node.to_codenode()
+                                                                                               dst_codenode
                                                                                                )
             return
 
@@ -1912,7 +1968,7 @@ class CFGAccurate(ForwardAnalysis, CFGBase):    # pylint: disable=abstract-metho
             self.kb.functions._add_call_to(
                 function_addr=src_node.function_address,
                 from_node=src_node.to_codenode(),
-                to_addr=dst_node.addr,
+                to_addr=dst_node_addr,
                 retn_node=ret_node,
                 syscall=False,
                 ins_addr=ins_addr,
@@ -1924,7 +1980,7 @@ class CFGAccurate(ForwardAnalysis, CFGBase):    # pylint: disable=abstract-metho
             self.kb.functions._add_call_to(
                 function_addr=src_node.function_address,
                 from_node=src_node.to_codenode(),
-                to_addr=dst_node.addr,
+                to_addr=dst_node_addr,
                 retn_node=src_node.to_codenode(),  # For syscalls, they are returning to the address of themselves
                 syscall=True,
                 ins_addr=ins_addr,
@@ -1936,32 +1992,33 @@ class CFGAccurate(ForwardAnalysis, CFGBase):    # pylint: disable=abstract-metho
             self.kb.functions._add_return_from(
                 function_addr=src_node.function_address,
                 from_node=src_node.to_codenode(),
-                to_node=dst_node.to_codenode(),
+                to_node=dst_codenode,
             )
 
-            # Create a returning edge in the caller function
-            self.kb.functions._add_return_from_call(
-                function_addr=dst_node.function_address,
-                src_function_addr=src_node.function_address,
-                to_node=dst_node.to_codenode()
-            )
+            if dst_node is not None:
+                # Create a returning edge in the caller function
+                self.kb.functions._add_return_from_call(
+                    function_addr=dst_node_func_addr,
+                    src_function_addr=src_node.function_address,
+                    to_node=dst_codenode,
+                )
 
         elif jumpkind == 'Ijk_FakeRet':
             self.kb.functions._add_fakeret_to(
                 function_addr=src_node.function_address,
                 from_node=src_node.to_codenode(),
-                to_node=dst_node.to_codenode(),
+                to_node=dst_codenode,
                 confirmed=confirmed,
             )
 
         elif jumpkind == 'Ijk_Boring':
 
             src_obj = self.project.loader.find_object_containing(src_node.addr)
-            dest_obj = self.project.loader.find_object_containing(dst_node.addr)
+            dest_obj = self.project.loader.find_object_containing(dst_node.addr) if dst_node is not None else None
 
             if src_obj is dest_obj:
                 # Jump/branch within the same object. Might be an outside jump.
-                to_outside = src_node.function_address != dst_node.function_address
+                to_outside = src_node.function_address != dst_node_func_addr
             else:
                 # Jump/branch between different objects. Must be an outside jump.
                 to_outside = True
@@ -1970,7 +2027,7 @@ class CFGAccurate(ForwardAnalysis, CFGBase):    # pylint: disable=abstract-metho
                 self.kb.functions._add_transition_to(
                     function_addr=src_node.function_address,
                     from_node=src_node.to_codenode(),
-                    to_node=dst_node.to_codenode(),
+                    to_node=dst_codenode,
                     ins_addr=ins_addr,
                     stmt_idx=stmt_idx,
                 )
@@ -1979,8 +2036,8 @@ class CFGAccurate(ForwardAnalysis, CFGBase):    # pylint: disable=abstract-metho
                 self.kb.functions._add_outside_transition_to(
                     function_addr=src_node.function_address,
                     from_node=src_node.to_codenode(),
-                    to_node=dst_node.to_codenode(),
-                    to_function_addr=dst_node.function_address,
+                    to_node=dst_codenode,
+                    to_function_addr=dst_node_func_addr,
                     ins_addr=ins_addr,
                     stmt_idx=stmt_idx,
                 )
@@ -3309,4 +3366,5 @@ class CFGAccurate(ForwardAnalysis, CFGBase):    # pylint: disable=abstract-metho
         state.options |= self._state_add_options
         state.options = state.options.difference(self._state_remove_options)
 
-CFGAccurate.register_default()
+from angr.analyses import AnalysesHub
+AnalysesHub.register_default('CFGAccurate', CFGAccurate)

@@ -1,5 +1,6 @@
 from . import ExplorationTechnique
 from .. import sim_options
+from ..errors import SimIRSBNoDecodeError
 
 import logging
 l = logging.getLogger("angr.exploration_techniques.explorer")
@@ -95,11 +96,11 @@ class Explorer(ExplorationTechnique):
         if not self.find_stash in simgr.stashes: simgr.stashes[self.find_stash] = []
         if not self.avoid_stash in simgr.stashes: simgr.stashes[self.avoid_stash] = []
 
-    def step(self, simgr, stash, **kwargs):
+    def step(self, simgr, stash=None, **kwargs):
         base_extra_stop_points = set(kwargs.get("extra_stop_points") or {})
-        return simgr._one_step(stash=stash, extra_stop_points=base_extra_stop_points | self._extra_stop_points, **kwargs)
+        return simgr.step(stash=stash, extra_stop_points=base_extra_stop_points | self._extra_stop_points, **kwargs)
 
-    def filter(self, state):
+    def filter(self, simgr, state, filter_func=None):
         if sim_options.UNICORN in state.options and self._warn_unicorn:
             self._warn_unicorn = False # show warning only once
             l.warning("Using unicorn with find or avoid conditions that are a lambda (not a number, set, tuple or list).")
@@ -122,7 +123,18 @@ class Explorer(ExplorationTechnique):
                 while state.addr not in rFind:
                     if state.addr in rAvoid:
                         return self.avoid_stash
-                    state = self.project.factory.successors(state, num_inst=1).successors[0]
+                    try:
+                        state = self.project.factory.successors(state, num_inst=1).successors[0]
+                    except SimIRSBNoDecodeError as ex:
+                        if state.arch.name.startswith('MIPS'):
+                            l.warning('Due to MIPS delay slots, the find address must be executed with other instructions and therefore may not be able to be found' + \
+                                ' - Trying to find state that includes find address')
+                            if len(rFind.intersection(set(state.block().instruction_addrs))) > 0:
+                                #there is an address that is both in the block AND in the rFind stat
+                                l.warning('Found state that includes find instruction, this one will be returned')
+                                rFind = rFind.union(set(state.block().instruction_addrs))
+                        else:
+                                raise ex
                 if self.avoid_priority & (state.addr in rAvoid):
                     # Only occurs if the intersection of rAvoid and rFind is not empty
                     # Why would anyone want that?

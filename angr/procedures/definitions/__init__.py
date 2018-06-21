@@ -4,10 +4,11 @@ import archinfo
 from collections import defaultdict
 import logging
 
-from ..stubs.ReturnUnconstrained import ReturnUnconstrained
-from ..stubs.syscall_stub import syscall as stub_syscall
 from ...calling_conventions import DEFAULT_CC
 from ...misc import autoimport
+from ...sim_type import parse_file
+from ..stubs.ReturnUnconstrained import ReturnUnconstrained
+from ..stubs.syscall_stub import syscall as stub_syscall
 
 l = logging.getLogger("angr.procedures.definitions")
 SIM_LIBRARIES = {}
@@ -82,6 +83,7 @@ class SimLibrary(object):
         :param arch_name:   The string name of the architecture, i.e. the ``.name`` field from archinfo.
         :parm cc_cls:       The SimCC class (not an instance!) to use
         """
+        arch_name = archinfo.arch_from_id(arch_name).name
         self.default_ccs[arch_name] = cc_cls
 
     def set_non_returning(self, *names):
@@ -101,6 +103,33 @@ class SimLibrary(object):
         :param proto:   The prototype of the function as a SimTypeFunction
         """
         self.prototypes[name] = proto
+
+    def set_prototypes(self, protos):
+        """
+        Set the prototypes of many functions
+
+        :param protos:   Dictionary mapping function names to SimTypeFunction objects
+        """
+        self.prototypes.update(protos)
+
+    def set_c_prototype(self, c_decl):
+        """
+        Set the prototype of a function in the form of a C-style function declaration.
+
+        :param str c_decl: The C-style declaration of the function.
+        :return:           A tuple of (function name, function prototype)
+        :rtype:            tuple
+        """
+
+        parsed = parse_file(c_decl)
+        parsed_decl = parsed[0]
+        if not parsed_decl:
+            raise ValueError('Cannot parse the function prototype.')
+        func_name, func_proto = parsed_decl.items()[0]
+
+        self.set_prototype(func_name, func_proto)
+
+        return func_name, func_proto
 
     def add(self, name, proc_cls, **kwargs):
         """
@@ -141,8 +170,11 @@ class SimLibrary(object):
             proc.cc = self.default_ccs[arch.name](arch)
         if proc.display_name in self.prototypes:
             if proc.cc is None:
-                proc.cc = self.fallback_cc[arch.name]()
+                proc.cc = self.fallback_cc[arch.name](arch)
             proc.cc.func_ty = self.prototypes[proc.display_name]
+            if not proc.ARGS_MISMATCH:
+                proc.cc.num_args = len(proc.cc.func_ty.args)
+                proc.num_args = len(proc.cc.func_ty.args)
         if proc.display_name in self.non_returning:
             proc.returns = False
         proc.library_name = self.name
@@ -200,6 +232,17 @@ class SimLibrary(object):
         """
         return name in self.procedures
 
+    def has_prototype(self, func_name):
+        """
+        Check if a function has a prototype associated with it.
+
+        :param str func_name: The name of the function.
+        :return:              A bool indicating if a prototype of the function is available.
+        :rtype:               bool
+        """
+
+        return func_name in self.prototypes
+
 
 class SimSyscallLibrary(SimLibrary):
     """
@@ -215,6 +258,7 @@ class SimSyscallLibrary(SimLibrary):
     def __init__(self):
         super(SimSyscallLibrary, self).__init__()
         self.syscall_number_mapping = defaultdict(dict)
+        self.syscall_name_mapping = defaultdict(dict)
         self.default_cc_mapping = {}
         self.fallback_proc = stub_syscall
 
@@ -226,12 +270,14 @@ class SimSyscallLibrary(SimLibrary):
         o.default_ccs = dict(self.default_ccs)
         o.names = list(self.names)
         o.syscall_number_mapping = defaultdict(dict, self.syscall_number_mapping) # {abi: {number: name}}
+        o.syscall_name_mapping = defaultdict(dict, self.syscall_name_mapping) # {abi: {name: number}}
         o.default_cc_mapping = dict(self.default_cc_mapping) # {abi: cc}
         return o
 
     def update(self, other):
         super(SimSyscallLibrary, self).update(other)
         self.syscall_number_mapping.update(other.syscall_number_mapping)
+        self.syscall_name_mapping.update(other.syscall_name_mapping)
         self.default_cc_mapping.update(other.default_cc_mapping)
 
     def minimum_syscall_number(self, abi):
@@ -263,6 +309,7 @@ class SimSyscallLibrary(SimLibrary):
         :param name:    The name of the function
         """
         self.syscall_number_mapping[abi][number] = name
+        self.syscall_name_mapping[abi][name] = number
 
     def add_number_mapping_from_dict(self, abi, mapping):
         """
@@ -272,6 +319,7 @@ class SimSyscallLibrary(SimLibrary):
         :param mapping: A dict mapping syscall numbers to function names
         """
         self.syscall_number_mapping[abi].update(mapping)
+        self.syscall_name_mapping[abi].update(dict(reversed(i) for i in mapping.items()))
 
     def set_abi_cc(self, abi, cc_cls):
         """
@@ -336,7 +384,7 @@ class SimSyscallLibrary(SimLibrary):
         name, arch, abi = self._canonicalize(number, arch, abi_list)
         proc = super(SimSyscallLibrary, self).get_stub(name, arch)
         self._apply_numerical_metadata(proc, number, arch, abi)
-        l.warn("unsupported syscall: %s", number)
+        l.debug("unsupported syscall: %s", number)
         return proc
 
     def has_metadata(self, number, arch, abi_list=()):

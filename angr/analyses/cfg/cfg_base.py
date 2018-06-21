@@ -8,7 +8,7 @@ import networkx
 
 import pyvex
 from claripy.utils.orderedset import OrderedSet
-from cle import ELF, PE, Blob, TLSObject, ExternObject, KernelObject
+from cle import ELF, PE, Blob, TLSObject, MachO, ExternObject, KernelObject
 
 from ...misc.ux import deprecated
 from ... import SIM_PROCEDURES
@@ -653,6 +653,16 @@ class CFGBase(Analysis):
                         tpl = (section.min_addr, section.max_addr)
                         memory_regions.append(tpl)
 
+            elif isinstance(b, MachO):
+                if b.segments:
+                    # Get all executable segments
+                    for seg in b.segments:
+                        if seg.is_executable:
+                            # Take all sections from this segment (MachO style)
+                            for section in seg.sections:
+                                tpl = (section.min_addr, section.max_addr)
+                                memory_regions.append(tpl)
+
             elif isinstance(b, Blob):
                 # a blob is entirely executable
                 tpl = (b.min_addr, b.max_addr)
@@ -879,6 +889,10 @@ class CFGBase(Analysis):
             # This function does not have endpoints. It's either because it does not return, or we haven't analyzed all
             # blocks of it.
 
+            if not func.block_addrs_set:
+                # the function is empty. skip
+                continue
+
             # Let's first see if it's a known SimProcedure that does not return
             if self.project.is_hooked(func.addr):
                 procedure = self.project.hooked_by(func.addr)
@@ -997,6 +1011,18 @@ class CFGBase(Analysis):
                 break
 
         return changes
+
+    def _real_address(self, arch, addr):
+        """
+        Obtain the real address of an instruction. ARM architectures are supported.
+
+        :param Arch arch:   The Arch object.
+        :param int addr:    The instruction address.
+        :return:            The real address of an instruction.
+        :rtype:             int
+        """
+
+        return ((addr >> 1) << 1) if arch.name in ('ARMEL', 'ARMHF') else addr
 
     def normalize(self):
         """

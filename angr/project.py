@@ -9,7 +9,6 @@ from collections import defaultdict
 
 import archinfo
 import cle
-from cle.address_translator import AT
 
 from .misc.ux import once, deprecated
 
@@ -177,13 +176,13 @@ class Project(object):
         elif self.loader.main_object.engine_preset is not None:
             try:
                 engines.use_plugin_preset(self.loader.main_object.engine_preset)
-            except NoPlugin:
+            except AngrNoPluginError:
                 raise ValueError("The CLE loader asked to use a engine preset: %s" % \
                         self.loader.main_object.engine_preset)
         else:
             try:
                 engines.use_plugin_preset(self.arch.name)
-            except NoPlugin:
+            except AngrNoPluginError:
                 engines.use_plugin_preset('default')
 
         self.engines = engines
@@ -413,7 +412,7 @@ class Project(object):
 
         del self._sim_procedures[addr]
 
-    def hook_symbol(self, symbol_name, obj, kwargs=None, replace=None):
+    def hook_symbol(self, symbol_name, simproc, kwargs=None, replace=None):
         """
         Resolve a dependency in a binary. Looks up the address of the given symbol, and then hooks that
         address. If the symbol was not available in the loaded libraries, this address may be provided
@@ -425,7 +424,7 @@ class Project(object):
         functions, in which case it'll do the right thing.
 
         :param symbol_name: The name of the dependency to resolve.
-        :param obj:         The thing with which to satisfy the dependency.
+        :param simproc:     The SimProcedure instance (or function) with which to hook the symbol
         :param kwargs:      If you provide a SimProcedure for the hook, these are the keyword
                             arguments that will be passed to the procedure's `run` method
                             eventually.
@@ -435,17 +434,24 @@ class Project(object):
         :returns:           The address of the new symbol.
         :rtype:             int
         """
-        if type(obj) in (int, long):
-            # this is pretty intensely sketchy
-            l.info("Instructing the loader to re-point symbol %s at address %#x", symbol_name, obj)
-            self.loader.provide_symbol(self.loader.extern_object, symbol_name, AT.from_mva(obj, self.loader.extern_object).to_rva())
-            return obj
-
         if type(symbol_name) not in (int, long):
             sym = self.loader.find_symbol(symbol_name)
             if sym is None:
-                l.error("Could not find symbol %s", symbol_name)
-                return None
+                # it could be a previously unresolved weak symbol..?
+                new_sym = None
+                for reloc in self.loader.find_relevant_relocations(symbol_name):
+                    if not reloc.symbol.is_weak:
+                        raise Exception("Symbol is strong but we couldn't find its resolution? Report to @rhelmot.")
+                    if new_sym is None:
+                        new_sym = self.loader.extern_object.make_extern(symbol_name)
+                    reloc.resolve(new_sym)
+                    reloc.relocate([])
+
+                if new_sym is None:
+                    l.error("Could not find symbol %s", symbol_name)
+                    return None
+                sym = new_sym
+
             basic_addr = sym.rebased_addr
         else:
             basic_addr = symbol_name
@@ -453,7 +459,7 @@ class Project(object):
 
         hook_addr, _ = self.simos.prepare_function_symbol(symbol_name, basic_addr=basic_addr)
 
-        self.hook(hook_addr, obj, kwargs=kwargs, replace=replace)
+        self.hook(hook_addr, simproc, kwargs=kwargs, replace=replace)
         return hook_addr
 
     def hook_symbol_batch(self, hooks):
@@ -528,7 +534,7 @@ class Project(object):
 
         pg = self.factory.simgr(state)
         self._executing = True
-        return pg.step(until=lambda lpg: not self._executing)
+        return pg.run(until=lambda lpg: not self._executing)
 
     def terminate_execution(self):
         """
@@ -558,19 +564,14 @@ class Project(object):
 
     def __getstate__(self):
         try:
-            analyses, surveyors = self.analyses, self.surveyors
             store_func, load_func = self.store_function, self.load_function
-            self.analyses, self.surveyors = None, None
             self.store_function, self.load_function = None, None
             return dict(self.__dict__)
         finally:
-            self.analyses, self.surveyors = analyses, surveyors
             self.store_function, self.load_function = store_func, load_func
 
     def __setstate__(self, s):
         self.__dict__.update(s)
-        self.analyses = AnalysesHub(self)
-        self.surveyors = Surveyors(self)
 
     def _store(self, container):
         # If container is a filename.
@@ -629,7 +630,7 @@ class Project(object):
         return self.simos
 
 
-from .errors import AngrError, NoPlugin
+from .errors import AngrError, AngrNoPluginError
 from .factory import AngrObjectFactory
 from angr.simos import SimOS, os_mapping
 from .analyses.analysis import AnalysesHub

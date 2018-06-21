@@ -135,18 +135,19 @@ class SimStateHistory(SimStatePlugin):
 
         return True
 
-    def widen(self, others):
+    def widen(self, others): # pylint: disable=unused-argument
         l.warning("history widening is not implemented!")
         return # TODO
 
-    def copy(self):
+    @SimStatePlugin.memo
+    def copy(self, memo): # pylint: disable=unused-argument
         return SimStateHistory(clone=self)
 
     def trim(self):
         """
         Discard the ancestry of this state.
         """
-        new_hist = self.copy()
+        new_hist = self.copy({})
         new_hist.parent = None
         self.state.register_plugin('history', new_hist)
 
@@ -518,6 +519,10 @@ class LambdaIterIter(LambdaAttrIter):
             for a in reversed(self._f(hist)) if self._reverse else self._f(hist):
                 yield a
 
-SimStateHistory.register_default('history')
+
+from angr.sim_state import SimState
+SimState.register_default('history', SimStateHistory)
+
+
 from .sim_action import SimAction, SimActionConstraint
 from .sim_event import SimEvent

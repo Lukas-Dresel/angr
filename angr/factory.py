@@ -166,27 +166,6 @@ class AngrObjectFactory(object):
         """
         return self.project.simos.state_call(addr, *args, **kwargs)
 
-    def tracer_state(self, input_content=None, magic_content=None, preconstrain_input=True,
-                     preconstrain_flag=True, **kwargs):
-        """
-        Returns a new SimState object correctly configured for tracing.
-
-        :param input_content     : Concrete input to feed to binary.
-        :param magic_content     : CGC magic flag page.
-        :param preconstrain_input: Should the path be preconstrained to the provided input?
-        :param preconstrain_flag : Should the path have the CGC flag page preconstrained?
-        :param constrained_addrs : Addresses which have had constraints applied to them and should not be removed.
-        :param kwargs            : Any additional keyword arguments that will be passed to the SimState constructor.
-
-        :returns : The new SimState for tracing.
-        :rtype   : angr.sim_state.SimState
-        """
-        return self.project.simos.state_tracer(input_content=input_content,
-                                                magic_content=magic_content,
-                                                preconstrain_input=preconstrain_input,
-                                                preconstrain_flag=preconstrain_flag,
-                                                **kwargs)
-
     def simgr(self, thing=None, **kwargs):
         return self.simulation_manager(thing=thing, **kwargs)
 
@@ -197,7 +176,7 @@ class AngrObjectFactory(object):
         :param thing:           Optional - What to put in the new SimulationManager's active stash (either a SimState or a list of SimStates).
         :param kwargs:          Any additional keyword arguments will be passed to the SimulationManager constructor
         :returns:               The new SimulationManager
-        :rtype:                 angr.manager.SimulationManager
+        :rtype:                 angr.sim_manager.SimulationManager
 
         Many different types can be passed to this method:
 
@@ -284,7 +263,8 @@ class AngrObjectFactory(object):
 
     def block(self, addr, size=None, max_size=None, byte_string=None, vex=None, thumb=False, backup_state=None,
               opt_level=None, num_inst=None, traceflags=0,
-              insn_bytes=None, insn_text=None  # backward compatibility
+              insn_bytes=None, insn_text=None,  # backward compatibility
+              strict_block_end=None,
               ):
 
         if insn_bytes is not None and insn_text is not None:
@@ -304,7 +284,8 @@ class AngrObjectFactory(object):
             l.warning('Keyword argument "max_size" has been deprecated for block(). Please use "size" instead.')
             size = max_size
         return Block(addr, project=self.project, size=size, byte_string=byte_string, vex=vex, thumb=thumb,
-                     backup_state=backup_state, opt_level=opt_level, num_inst=num_inst, traceflags=traceflags
+                     backup_state=backup_state, opt_level=opt_level, num_inst=num_inst, traceflags=traceflags,
+                     strict_block_end=strict_block_end
                      )
 
     def fresh_block(self, addr, size, backup_state=None):
@@ -334,7 +315,7 @@ class AngrObjectFactory(object):
     # Compatibility layer
     #
 
-    @deprecate('path_group()', 'simgr()')
+    @deprecate('path_group()', 'simulation_manager()')
     def path_group(self, thing=None, **kwargs):
         return self.simgr(thing, **kwargs)
 
@@ -346,6 +327,6 @@ class AngrObjectFactory(object):
 
 
 from .errors import AngrError
-from .manager import SimulationManager
+from .sim_manager import SimulationManager
 from .codenode import HookNode
 from .block import Block

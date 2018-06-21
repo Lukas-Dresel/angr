@@ -279,13 +279,13 @@ class SimSolver(SimStatePlugin):
             self._stored_solver = claripy.SolverStrings(backend=our_backend, track=track)
         elif o.ABSTRACT_SOLVER in self.state.options:
             self._stored_solver = claripy.SolverVSA()
-        elif o.REPLACEMENT_SOLVER in self.state.options:
+        elif o.SYMBOLIC in self.state.options and o.REPLACEMENT_SOLVER in self.state.options:
             self._stored_solver = claripy.SolverReplacement(auto_replace=False)
-        elif o.CACHELESS_SOLVER in self.state.options:
+        elif o.SYMBOLIC in self.state.options and o.CACHELESS_SOLVER in self.state.options:
             self._stored_solver = claripy.SolverCacheless(track=track)
-        elif o.COMPOSITE_SOLVER in self.state.options:
+        elif o.SYMBOLIC in self.state.options and o.COMPOSITE_SOLVER in self.state.options:
             self._stored_solver = claripy.SolverComposite(track=track)
-        elif o.SYMBOLIC in self.state.options and o.approximation & self.state.options:
+        elif o.SYMBOLIC in self.state.options and any(opt in self.state.options for opt in o.approximation):
             self._stored_solver = claripy.SolverHybrid(track=track)
         elif o.SYMBOLIC in self.state.options:
             self._stored_solver = claripy.Solver(track=track)
@@ -405,7 +405,8 @@ class SimSolver(SimStatePlugin):
     # Branching stuff
     #
 
-    def copy(self):
+    @SimStatePlugin.memo
+    def copy(self, memo): # pylint: disable=unused-argument
         return SimSolver(solver=self._solver.branch(), all_variables=self.all_variables, temporal_tracked_variables=self.temporal_tracked_variables, eternal_tracked_variables=self.eternal_tracked_variables)
 
     @error_converter
@@ -730,7 +731,7 @@ class SimSolver(SimStatePlugin):
         """
         try:
             return self.eval_exact(e, 1, **{k: v for (k, v) in kwargs.iteritems() if k != 'default'})[0]
-        except (SimUnsatError, SimValueError):
+        except (SimUnsatError, SimValueError, SimSolverModeError):
             if 'default' in kwargs:
                 return kwargs.pop('default')
             raise
@@ -900,7 +901,9 @@ class SimSolver(SimStatePlugin):
         """
         return e.variables
 
-SimSolver.register_default('solver')
+from angr.sim_state import SimState
+SimState.register_default('solver', SimSolver)
+
 from .. import sim_options as o
 from .inspect import BP_AFTER
 from ..errors import SimValueError, SimUnsatError, SimSolverModeError, SimSolverOptionError
