@@ -13,9 +13,9 @@ class recv(SimProcedure, StringSimProcedureMixin):
     def run(self, sockfd, buf, len, flags):
         length = self.state.se.eval(len)
         dst = self.state.se.eval(buf)
-        fd = self.state.posix.get_next_available_fd()  # The solver fails here if we try to evaluate the expression
-        data = claripy.StringS("recv_input", length)
-        written_length = self.state.posix.write(fd, data, length)
+        fd = self.state.posix.get_fd(sockfd)  # The solver fails here if we try to evaluate the expression (BVS .. 0x0)
+        data = claripy.StringS("recv_out", length)
+        written_length = fd.write_data(data, length)
         self.state.memory.store(dst, data)
         return written_length
 
