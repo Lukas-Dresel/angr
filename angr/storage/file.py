@@ -73,12 +73,26 @@ class SimFileBase(SimStatePlugin):
         self.writable = writable
 
         if ident is None:
-            nice_name = self.name if all(0x20 <= ord(c) <= 0x7f for c in self.name) else '???'
-            self.ident = 'file_%d_%s' % (next(file_counter), nice_name)
+            self.ident = self.make_ident(self.name)
 
         if 'memory_id' in kwargs:
             kwargs['memory_id'] = self.ident
         super(SimFileBase, self).__init__(**kwargs)
+
+    @staticmethod
+    def make_ident(name):
+        def generate():
+            consecutive_bad = 0
+            for ch in name:
+                if 0x20 <= ord(ch) <= 0x7e:
+                    consecutive_bad = 0
+                    yield ch
+                elif consecutive_bad < 3:
+                    consecutive_bad += 1
+                    yield '?'
+
+        nice_name = ''.join(generate())
+        return 'file_%d_%s' % (next(file_counter), nice_name)
 
     def concretize(self, **kwargs):
         """
@@ -116,9 +130,10 @@ class SimFileBase(SimStatePlugin):
         """
         raise NotImplementedError
 
+
 class SimFile(SimFileBase, SimSymbolicMemory):
     """
-    The normal SimFile is meant to files on disk. It subclasses SimSymbolicMemory so loads and stores to/from
+    The normal SimFile is meant to model files on disk. It subclasses SimSymbolicMemory so loads and stores to/from
     it are very simple.
 
     :param name:        The name of the file
@@ -175,6 +190,8 @@ class SimFile(SimFileBase, SimSymbolicMemory):
 
         if type(self._size) in (int, long):
             self._size = claripy.BVV(self._size, state.arch.bits)
+        elif len(self._size) != state.arch.bits:
+            raise TypeError("SimFile size must be a bitvector of size %d (arch.bits)" % state.arch.bits)
 
     @property
     def size(self):
@@ -232,7 +249,10 @@ class SimFile(SimFileBase, SimSymbolicMemory):
             # note: this assumes that constraints cannot be removed
             return self.load(pos, passed_max_size), size, size + pos
 
-    def write(self, pos, data, size=None, **kwargs):
+    def write(self, pos, data, size=None, events=True, **kwargs):
+        if events:
+            self.state.history.add_event('fs_write', filename=self.name, data=data, size=size, pos=pos)
+
         data = _deps_unpack(data)[0]
         if size is None:
             size = len(data) // self.state.arch.byte_width if isinstance(data, claripy.Bits) else len(data)
@@ -293,6 +313,8 @@ class SimFileStream(SimFile):
         super(SimFileStream, self).set_state(state)
         if type(self.pos) in (int, long):
             self.pos = state.solver.BVV(self.pos, state.arch.bits)
+        elif len(self.pos) != state.arch.bits:
+            raise TypeError("SimFileStream position must be a bitvector of size %d (arch.bits)" % state.arch.bits)
 
     def read(self, pos, size, **kwargs):
         no_stream = kwargs.pop('no_stream', False)
@@ -435,7 +457,7 @@ class SimPackets(SimFileBase):
         self.content.append(packet)
         return packet + (pos+1,)
 
-    def write(self, pos, data, size=None, **kwargs):
+    def write(self, pos, data, size=None, events=True, **kwargs):
         """
         Write a packet to the stream.
 
@@ -444,6 +466,9 @@ class SimPackets(SimFileBase):
         :param size:        The optional size to write. May be symbolic; must be constrained to at most the size of data.
         :return:            The next packet to use after this
         """
+        if events:
+            self.state.history.add_event('fs_write', filename=self.name, data=data, size=size, pos=pos)
+
         # sanity check on read/write modes
         if self.write_mode is None:
             self.write_mode = True
@@ -709,6 +734,7 @@ class SimFileDescriptorBase(SimStatePlugin):
 
         return size
 
+
 class SimFileDescriptor(SimFileDescriptorBase):
     """
     A simple file descriptor forwarding reads and writes to a SimFile. Contains information about
@@ -832,6 +858,7 @@ class SimFileDescriptor(SimFileDescriptorBase):
     def widen(self, _):
         raise SimMergeError("Widening the filesystem is unsupported")
 
+
 class SimFileDescriptorDuplex(SimFileDescriptorBase):
     """
     A file descriptor that refers to two file storage mechanisms, one to read from and one to write to. As a result,
@@ -939,6 +966,7 @@ class SimFileDescriptorDuplex(SimFileDescriptorBase):
     def widen(self, _):
         raise SimMergeError("Widening the filesystem is unsupported")
 
+
 class SimPacketsSlots(SimFileBase):
     """
     SimPacketsSlots is the new SimDialogue, if you've ever seen that before.
@@ -1012,5 +1040,6 @@ class SimPacketsSlots(SimFileBase):
 
     def widen(self, _):
         raise SimMergeError("Widening the filesystem is unsupported")
+
 
 from ..errors import SimMergeError, SimFileError, SimSolverError
