@@ -945,7 +945,16 @@ def translate_inner(state, irop, s_args):
     try:
         if irop._float and not options.SUPPORT_FLOATING_POINT in state.options:
             raise UnsupportedIROpError("floating point support disabled")
-        return irop.calculate(*s_args)
+        if any(arg.is_string for arg in s_args):
+            args = tuple()
+            for arg in s_args:
+                if arg.is_string:
+                    args += state.translator.translate_expression(arg)
+                else:
+                    args += (arg, )
+            return irop.calculate(*args)
+        else:
+            return irop.calculate(*s_args)
     except SimZeroDivisionException:
         if state.mode == 'static' and len(s_args) == 2 and state.se.is_true(s_args[1] == 0):
             # Monkeypatch the dividend to another value instead of 0
