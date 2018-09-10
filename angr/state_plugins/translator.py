@@ -1,5 +1,24 @@
+import logging
 import claripy
 from .plugin import SimStatePlugin
+
+l = logging.getLogger("angr.state_plugins.translator")
+
+
+def _normalize_args(state, args):
+    """
+    This function translate the ascii value encoded in the BV
+    as a StringV holding the corresponding bytes of the ascii character
+    :param state: State of the program at that point
+    :param args: arguments that has to be translated
+    :return:
+    """
+    left_operand, right_operand = args
+    if isinstance(left_operand, claripy.ast.BV) and left_operand.concrete:
+        left_operand = claripy.StringV(chr(state.se.eval_one(left_operand)))
+    if isinstance(right_operand, claripy.ast.BV) and right_operand.concrete:
+        right_operand = claripy.StringV(chr(state.se.eval_one(right_operand)))
+    return left_operand, right_operand
 
 
 def translate_StringS(state, expr, args):
@@ -24,12 +43,33 @@ def translate_StrReverse(state, expr, args):
 
 
 def translate__ne__(state, constraint, fixed_args):
-    left_operand, right_operand = fixed_args
-    if isinstance(left_operand, claripy.ast.BV) and left_operand.concrete:
-        left_operand = claripy.StringV(chr(state.se.eval_one(left_operand)))
-    if isinstance(right_operand, claripy.ast.BV) and right_operand.concrete:
-        right_operand = claripy.StringV(chr(state.se.eval_one(right_operand)))
+    left_operand, right_operand = _normalize_args(state, fixed_args)
     return left_operand != right_operand
+
+
+def translate__eq__(state, constraint, fixed_args):
+    left_operand, right_operand = _normalize_args(state, fixed_args)
+    return left_operand == right_operand
+
+
+def translate__gt__(state, constraint, fixed_args):
+    left_operand, right_operand = _normalize_args(state, fixed_args)
+    return left_operand > right_operand
+
+
+def translate__ge__(state, constraint, fixed_args):
+    left_operand, right_operand = _normalize_args(state, fixed_args)
+    return left_operand >= right_operand
+
+
+def translate__lt__(state, constraint, fixed_args):
+    left_operand, right_operand = _normalize_args(state, fixed_args)
+    return left_operand < right_operand
+
+
+def translate__le__(state, constraint, fixed_args):
+    left_operand, right_operand = _normalize_args(state, fixed_args)
+    return left_operand <= right_operand
 
 
 EXPRESSIONS_TRANSLATION_TABLE = {
@@ -40,6 +80,11 @@ EXPRESSIONS_TRANSLATION_TABLE = {
 
 CONSTRAINTS_TRANSLATION_TABLE = {
     '__ne__': translate__ne__,
+    '__eq__': translate__eq__,
+    '__gt__': translate__gt__,
+    '__ge__': translate__ge__,
+    '__lt__': translate__lt__,
+    '__le__': translate__le__,
     'StrExtract': translate_StrExtract,
     'StringS':  translate_StringS
 }
@@ -51,13 +96,8 @@ class SimStateTranslator(SimStatePlugin):
     """
     def __init__(self):
         SimStatePlugin.__init__(self)
-
-        # Table holding a mapping between BV variables and STRING variable
-        self.alias_table = {}
+        # Table holding the mapping between operations and the correct translation routine
         self.translation_table = {}
-
-    def add_variable_alias(self, var_name, alias_name):
-       self.alias_table[var_name] = alias_name
 
     def _get_original_expr_before_translation(self, expr):
         if isinstance(expr, claripy.ast.Base) and expr._hash in self.translation_table.keys():
@@ -69,6 +109,8 @@ class SimStateTranslator(SimStatePlugin):
             fixed_args = [self._get_original_expr_before_translation(arg) for arg in constraint.args]
             if any(isinstance(arg, claripy.ast.String) for arg in fixed_args):
                 return CONSTRAINTS_TRANSLATION_TABLE[constraint.op](self.state, constraint, fixed_args),
+            else:
+                l.debug('Skipping translation of %r (operation: %r)', constraint, constraint.op)
         return constraint,
 
     def populate_translation_table(self, translated_hash, non_translated_expr):
@@ -91,15 +133,12 @@ class SimStateTranslator(SimStatePlugin):
         :return:
         """
         if expr.op not in EXPRESSIONS_TRANSLATION_TABLE.keys():
-            print "++++++++++++++++++++++++++++++======="
-            print "Unknown operation {} \t ignoring...".format(expr.op)
-            print "++++++++++++++++++++++++++++++======="
+            l.debug("Unknown operation %s \t ignoring...", expr.op)
             return expr,
         else:
             translated_expr = EXPRESSIONS_TRANSLATION_TABLE[expr.op](self.state, expr, args)
             # print "translated {} to {}".format(expr, translated_expr)
             self.populate_translation_table(translated_expr._hash, expr)
-            # print self.translation_table
             return translated_expr,
 
     def translate_expression(self, expr):
@@ -121,7 +160,7 @@ class SimStateTranslator(SimStatePlugin):
     @SimStatePlugin.memo
     def copy(self, memo): # pylint: disable=unused-argument
         c = SimStateTranslator()
-        c.allocation_base = self.alias_table.copy()
+        c.translation_table = self.translation_table.copy()
         return c
 
     # def _combine(self, others):
