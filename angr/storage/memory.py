@@ -784,7 +784,7 @@ class SimMemory(SimStatePlugin):
 
         # the endianess
         endness = self.endness if endness is None else endness
-        if endness == "Iend_LE":
+        if endness == "Iend_LE" and not isinstance(r, claripy.ast.String):
             r = r.reversed
 
         if inspect is True:

@@ -20,8 +20,26 @@ def _normalize_args(state, args):
         right_operand = claripy.StringV(chr(state.se.eval_one(right_operand)))
     return left_operand, right_operand
 
+def _build_if_constraint(data, pattern, start_bit, arch_bits):
+    msb = data.length - start_bit - 1
+    lsb = msb - pattern.length + 1
+    if start_bit == data.length - pattern.length:
+        return claripy.If(data[msb:lsb] == pattern, msb, claripy.BVV(0x0, arch_bits))
+    else:
+        return claripy.If(
+            data[msb:lsb] == pattern,
+            claripy.BVV(msb, arch_bits),
+            _build_if_constraint(data, pattern, start_bit + 8, arch_bits)
+        )
 
-def translate_StringS(state, expr, args):
+
+# ---------------------- Expressions translation routines ----------------------
+
+def translate_expr__add__(state, expr, args):
+    left_operand, right_operand, = args
+    return left_operand + right_operand
+
+def translate_expr_StringS(state, expr, args):
     var_name, uninitialized = args
     # We need to pass through the state plugin because we need to trigger the
     # hook on the new symbolic variable creation
@@ -29,64 +47,74 @@ def translate_StringS(state, expr, args):
         claripy.String.STRING_TYPE_IDENTIFIER,
         claripy.String.GENERATED_BVS_IDENTIFIER), expr.length)
 
+def translate_expr_StringV(state, expr, args):
+    string_value, _ = args
+    return state.se.BVV(string_value)
 
-def translate_StrExtract(state, expr, args):
+def translate_expr_StrExtract(state, expr, args):
     start_byte, length_extract, bv_to_be_extracted = args
     return claripy.Extract(
         (start_byte + length_extract)*8 - 1, start_byte*8, bv_to_be_extracted
     )
 
+def translate_expr_StrIndexOf(state, expr, args):
+    data, pattern, start_byte, arch_bits = args
+    res = _build_if_constraint(data, pattern, state.se.eval(start_byte, 1)*8, arch_bits)
+    return res
 
-def translate_StrReverse(state, expr, args):
+def translate_expr_StrReverse(state, expr, args):
     bv_to_be_reversed, = args
     return bv_to_be_reversed.reversed
 
+# ---------------------- Constraints translation routines ----------------------
 
-def translate__ne__(state, constraint, fixed_args):
+def translate_constraint__ne__(state, constraint, fixed_args):
     left_operand, right_operand = _normalize_args(state, fixed_args)
     return left_operand != right_operand
 
 
-def translate__eq__(state, constraint, fixed_args):
+def translate_constraint__eq__(state, constraint, fixed_args):
     left_operand, right_operand = _normalize_args(state, fixed_args)
     return left_operand == right_operand
 
 
-def translate__gt__(state, constraint, fixed_args):
+def translate_constraint__gt__(state, constraint, fixed_args):
     left_operand, right_operand = _normalize_args(state, fixed_args)
     return left_operand > right_operand
 
 
-def translate__ge__(state, constraint, fixed_args):
+def translate_constraint__ge__(state, constraint, fixed_args):
     left_operand, right_operand = _normalize_args(state, fixed_args)
     return left_operand >= right_operand
 
 
-def translate__lt__(state, constraint, fixed_args):
+def translate_constraint__lt__(state, constraint, fixed_args):
     left_operand, right_operand = _normalize_args(state, fixed_args)
     return left_operand < right_operand
 
 
-def translate__le__(state, constraint, fixed_args):
+def translate_constraint__le__(state, constraint, fixed_args):
     left_operand, right_operand = _normalize_args(state, fixed_args)
     return left_operand <= right_operand
 
 
+
 EXPRESSIONS_TRANSLATION_TABLE = {
-    'StrReverse': translate_StrReverse,
-    'StrExtract': translate_StrExtract,
-    'StringS':  translate_StringS
+    'StringS':  translate_expr_StringS,
+    'StringV': translate_expr_StringV,
+    'StrReverse': translate_expr_StrReverse,
+    'StrExtract': translate_expr_StrExtract,
+    'StrIndexOf': translate_expr_StrIndexOf,
+    '__add__': translate_expr__add__,
 }
 
 CONSTRAINTS_TRANSLATION_TABLE = {
-    '__ne__': translate__ne__,
-    '__eq__': translate__eq__,
-    '__gt__': translate__gt__,
-    '__ge__': translate__ge__,
-    '__lt__': translate__lt__,
-    '__le__': translate__le__,
-    'StrExtract': translate_StrExtract,
-    'StringS':  translate_StringS
+    '__ne__': translate_constraint__ne__,
+    '__eq__': translate_constraint__eq__,
+    '__gt__': translate_constraint__gt__,
+    '__ge__': translate_constraint__ge__,
+    '__lt__': translate_constraint__lt__,
+    '__le__': translate_constraint__le__,
 }
 
 
@@ -133,12 +161,12 @@ class SimStateTranslator(SimStatePlugin):
         :return:
         """
         if expr.op not in EXPRESSIONS_TRANSLATION_TABLE.keys():
-            l.debug("Unknown operation %s \t ignoring...", expr.op)
+            l.debug("Unknown expression %s... ignoring...", expr.op)
             return expr,
         else:
             translated_expr = EXPRESSIONS_TRANSLATION_TABLE[expr.op](self.state, expr, args)
-            # print "translated {} to {}".format(expr, translated_expr)
             self.populate_translation_table(translated_expr._hash, expr)
+            l.debug("Translating %r to %r", expr, translated_expr)
             return translated_expr,
 
     def translate_expression(self, expr):
@@ -147,7 +175,7 @@ class SimStateTranslator(SimStatePlugin):
         :param expr:
         :return:
         """
-        if not isinstance(expr, claripy.ast.String):
+        if not isinstance(expr, claripy.ast.Base):
             return expr,
         if not expr.args:
             return self.translate_expression_helper(expr)
@@ -162,37 +190,6 @@ class SimStateTranslator(SimStatePlugin):
         c = SimStateTranslator()
         c.translation_table = self.translation_table.copy()
         return c
-
-    # def _combine(self, others):
-    #     merging_occured = False
-    #
-    #     new_allocation_base = max(o.allocation_base for o in others)
-    #     if self.state.se.symbolic(new_allocation_base):
-    #         raise ValueError("wat")
-    #
-    #     concrete_allocation_base = (
-    #         self.allocation_base
-    #         if type(self.allocation_base) in (int, long) else
-    #         self.state.se.eval(self.allocation_base)
-    #     )
-    #
-    #     concrete_new_allocation_base = (
-    #         new_allocation_base
-    #         if type(new_allocation_base) in (int, long) else
-    #         self.state.se.eval(new_allocation_base)
-    #     )
-    #
-    #     if concrete_allocation_base != concrete_new_allocation_base:
-    #         self.allocation_base = new_allocation_base
-    #         merging_occured = True
-    #
-    #     return merging_occured
-    #
-    # def merge(self, others, merge_conditions, common_ancestor=None): # pylint: disable=unused-argument
-    #     return self._combine(others)
-    #
-    # def widen(self, others):
-    #     return self._combine(others)
 
 
 from angr.sim_state import SimState
