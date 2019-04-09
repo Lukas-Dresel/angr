@@ -1,7 +1,7 @@
 """
 This module contains symbolic implementations of VEX operations.
 """
-
+from functools import partial
 import re
 import sys
 import collections
@@ -157,10 +157,10 @@ bitwise_operation_map = {
     'Not': '__invert__',
 }
 rm_map = {
-    0: claripy.fp.RM_RNE,
-    1: claripy.fp.RM_RTN,
-    2: claripy.fp.RM_RTP,
-    3: claripy.fp.RM_RTZ,
+    0: claripy.fp.RM_NearestTiesEven,
+    1: claripy.fp.RM_TowardsNegativeInf,
+    2: claripy.fp.RM_TowardsPositiveInf,
+    3: claripy.fp.RM_TowardsZero,
 }
 
 generic_names = set()
@@ -293,8 +293,20 @@ class SimIROp(object):
                 l.error("%s is an unexpected conversion operation configuration", self)
                 assert False
 
+        elif self._float and self._vector_zero:
+            # /* --- lowest-lane-only scalar FP --- */
+            f = getattr(claripy, 'fp' + self._generic_name, None)
+            if f is not None:
+                f = partial(f, claripy.fp.RM.default()) # always? really?
+
+            f = f if f is not None else getattr(self, '_fgeneric_' + self._generic_name, None)
+            if f is None:
+                raise SimOperationError("no implementation found for operation {}".format(self._generic_name))
+
+            self._calculate = partial(self._vectorize_or_dont, f)
+
         # other conversions
-        elif self._conversion and self._generic_name != 'Round' and self._generic_name != 'Reinterp':
+        elif self._conversion and self._generic_name not in {'Round', 'Reinterp'}:
             if self._generic_name == "DivMod":
                 l.debug("... using divmod")
                 self._calculate = self._op_divmod
@@ -309,13 +321,12 @@ class SimIROp(object):
             self._calculate = self._op_mapped
 
         # generic mapping operations
-        elif self._generic_name in arithmetic_operation_map or self._generic_name in shift_operation_map:
+        elif    self._generic_name in arithmetic_operation_map or \
+                self._generic_name in shift_operation_map:
             l.debug("... using generic mapping op")
             assert self._from_side is None
 
-            if self._float and self._vector_zero:
-                self._calculate = self._op_float_op_just_low
-            elif self._float and self._vector_count is None:
+            if self._float and self._vector_count is None:
                 self._calculate = self._op_float_mapped
             elif not self._float and self._vector_count is not None:
                 self._calculate = self._op_vector_mapped
@@ -464,11 +475,6 @@ class SimIROp(object):
                 ] for i in reversed(range(self._vector_count))
             )
         return claripy.Concat(*(self._op_float_mapped(rm_part + ca).raw_to_bv() for ca in chopped_args))
-
-    def _op_float_op_just_low(self, args):
-        chopped = [arg[(self._vector_size - 1):0].raw_to_fp() for arg in args]
-        result = getattr(claripy, 'fp' + self._generic_name)(claripy.fp.RM.default(), *chopped).raw_to_bv()
-        return claripy.Concat(args[0][(args[0].length - 1):self._vector_size], result)
 
     def _op_concat(self, args):
         return claripy.Concat(*args)
@@ -773,12 +779,50 @@ class SimIROp(object):
             return claripy.fpToUBV(rm, arg, self._to_size)
 
     def _op_fgeneric_Cmp(self, args): #pylint:disable=no-self-use
+
+        # see https://github.com/angr/vex/blob/master/pub/libvex_ir.h#L580
         a, b = args[0].raw_to_fp(), args[1].raw_to_fp()
         return claripy.ite_cases((
             (claripy.fpLT(a, b), claripy.BVV(0x01, 32)),
             (claripy.fpGT(a, b), claripy.BVV(0x00, 32)),
             (claripy.fpEQ(a, b), claripy.BVV(0x40, 32)),
             ), claripy.BVV(0x45, 32))
+
+    def _vectorize_or_dont(self, f, args, rm=None, rm_passed=False):
+        if rm is not None:
+            rm = self._translate_rm(rm)
+            if rm_passed:
+                f = partial(f, rm)
+
+        #import ipdb; ipdb.set_trace()
+
+        if self._vector_size is None:
+            return f(args)
+
+        if self._vector_zero:
+            chopped = [arg[(self._vector_size - 1):0].raw_to_fp() for arg in args]
+            result = f(*chopped).raw_to_bv()
+            return claripy.Concat(args[0][(args[0].length - 1):self._vector_size], result)
+        else:
+            result = []
+            for i in reversed(range(self._vector_count)):
+                # pylint:disable=no-member
+                left = claripy.Extract(
+                    (i + 1) * self._vector_size - 1, i * self._vector_size, args[0]
+                ).raw_to_fp()
+
+                result.append(f(left, *args[1:]))
+            return claripy.Concat(*result)
+
+    def _fgeneric_minmax(self, cmp_op, a, b):
+        a, b = a.raw_to_fp(), b.raw_to_fp()
+        return claripy.If(cmp_op(a, b), a, b)
+
+    def _fgeneric_Min(self, a, b):
+        return self._fgeneric_minmax(claripy.fpLT, a, b)
+
+    def _fgeneric_Max(self, a, b):
+        return self._fgeneric_minmax(claripy.fpGT, a, b)
 
     def _op_fgeneric_Reinterp(self, args):
         if self._to_type == 'I':
@@ -792,10 +836,10 @@ class SimIROp(object):
     def _op_fgeneric_Round(self, args):
         if self._vector_size is not None:
             rm = {
-                'RM': claripy.fp.RM_RTN,
-                'RP': claripy.fp.RM_RTP,
-                'RN': claripy.fp.RM_RNE,
-                'RZ': claripy.fp.RM_RTZ,
+                'RM': claripy.fp.RM_TowardsNegativeInf,
+                'RP': claripy.fp.RM_TowardsPositiveInf,
+                'RN': claripy.fp.RM_NearestTiesEven,
+                'RZ': claripy.fp.RM_TowardsZero,
             }[self._rounding_mode]
 
             rounded = []
@@ -811,7 +855,7 @@ class SimIROp(object):
             # TODO: look into fixing this
             rm = self._translate_rm(args[0])
             rounded_bv = claripy.fpToSBV(rm, args[1].raw_to_fp(), args[1].length)
-            return claripy.fpToFP(claripy.fp.RM_RNE, rounded_bv, claripy.fp.FSort.from_size(args[1].length))
+            return claripy.fpToFP(claripy.fp.RM_NearestTiesEven, rounded_bv, claripy.fp.FSort.from_size(args[1].length))
 
     def _op_generic_pack_StoU_saturation(self, args, src_size, dst_size):
         """
