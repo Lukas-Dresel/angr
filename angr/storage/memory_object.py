@@ -5,6 +5,7 @@ def obj_bit_size(o):
     if type(o) == bytes:
         return len(o) * 8
     return o.size()
+
 class SimMemoryObject(object):
     """
     A MemoryObjectRef instance is a reference to a byte or several bytes in

@@ -63,6 +63,7 @@ class BasePage:
         start = max(mo.base, self._page_addr)
         end = min(mo.last_addr + 1, self._page_addr + self._page_size)
         if end <= start:
+            import ipdb; ipdb.set_trace()
             l.warning("Nothing left of the memory object to store in SimPage.")
         return start, end
 
@@ -345,6 +346,31 @@ class SimPagedMemory:
         self._name_mapping = cooldict.BranchingDict() if name_mapping is None else name_mapping
         self._hash_mapping = cooldict.BranchingDict() if hash_mapping is None else hash_mapping
         self._updated_mappings = set()
+
+    def _page_align_down(self, x):
+        return x - (x % self._page_size)
+
+    def _page_align_up(self, x):
+        return (x + self._page_size - 1) % self._page_size
+
+    def __is_page_aligned(self, x):
+        return x % self._page_size == 0
+
+    def _num_pages(self, start, end):
+        return self._page_align_up(end - self._page_align_down(start)) // self._page_size
+
+    def _page_id(self, addr):
+        return addr // self._page_size
+
+    def _page_addr(self, page_id):
+        return page_id * self._page_size
+
+    def _page_base_addrs(self, addr, length):
+        addr = self._page_align_down(addr)
+        return range(addr, length, self._page_size)
+
+    #def _page_ids(self, addr, length):
+    #    return (a // self._page_size for a in range(start, start + num))
 
     def __getstate__(self):
         return {
@@ -726,9 +752,7 @@ class SimPagedMemory:
         return True
 
     def _containing_pages(self, mo_start, mo_end):
-        page_start = mo_start - mo_start%self._page_size
-        page_end = mo_end + (self._page_size - mo_end%self._page_size) if mo_end % self._page_size else mo_end
-        return [ b for b in range(page_start, page_end, self._page_size) ]
+        return [a for a in self._page_base_addrs(mo_start, mo_end)]
 
     def _containing_pages_mo(self, mo):
         mo_start = mo.base
@@ -1018,18 +1042,14 @@ class SimPagedMemory:
         if isinstance(addr, claripy.ast.bv.BV):
             addr = self.state.solver.max_int(addr)
 
-        base_page_num = addr // self._page_size
-
-        # round length
-        pages = length // self._page_size
-        if length % self._page_size > 0:
-            pages += 1
+        base_page_num = self._page_id(addr)
+        pages = self._num_pages(addr, addr + length)
 
         # this check should not be performed when constructing a CFG
         if self.state.mode != 'fastpath':
-            for page in range(pages):
-                page_id = base_page_num + page
-                if page_id * self._page_size in self:
+            for p_num in range(pages):
+                page_id = base_page_num + p_num
+                if self._page_base_from_num(page_id) in self:
                     err = "map_page received address and length combination which contained mapped page"
                     l.warning(err)
                     raise SimMemoryError(err)
@@ -1044,8 +1064,9 @@ class SimPagedMemory:
             if init_zero:
                 if self.state is not None:
                     self.state.scratch.push_priv(True)
-                mo = SimMemoryObject(claripy.BVV(0, self._page_size * self.byte_width), page_id*self._page_size, byte_width=self.byte_width)
-                self._apply_object_to_page(page_id*self._page_size, mo, page=self._pages[page_id])
+                page_addr = self._page_base_from_num(page_id)
+                mo = SimMemoryObject(claripy.BVV(0, self._page_size * self.byte_width), page_addr, byte_width=self.byte_width)
+                self._apply_object_to_page(page_addr, mo, page=self._pages[page_id])
                 if self.state is not None:
                     self.state.scratch.pop_priv()
 
@@ -1059,26 +1080,25 @@ class SimPagedMemory:
         if isinstance(addr, claripy.ast.bv.BV):
             addr = self.state.solver.max_int(addr)
 
-        base_page_num = addr // self._page_size
-
-        pages = length // self._page_size
-        if length % self._page_size > 0:
-            pages += 1
+        base_page_num = self._page_id(addr)
+        pages = self._num_pages(addr, addr + length)
 
         # this check should not be performed when constructing a CFG
         if self.state.mode != 'fastpath':
             for page in range(pages):
+                # TODO: Why is this different from the check in map_region? what if we unmap _backer backed pages?
                 if base_page_num + page not in self._pages:
                     l.warning("unmap_region received address and length combination is not mapped")
                     return
 
-        for page in range(pages):
-            del self._pages[base_page_num + page]
-            del self._symbolic_addrs[base_page_num + page]
+        for page_id in range(base_page_num, base_page_num + pages):
+            del self._pages[page_id]
+            del self._symbolic_addrs[page_id]
 
     def flush_pages(self, white_list):
         """
             :param white_list: white list of page number to exclude from the flush
+            :returns : a list of memory page ranges that were flushed
         """
         white_list_page_number = []
 
@@ -1088,14 +1108,18 @@ class SimPagedMemory:
 
         new_page_dict = {}
 
+        flushed = []
         # cycle over all the keys ( the page number )
         for page in self._pages:
             if page in white_list_page_number:
                 # l.debug("Page " + str(page) + " not flushed!")
                 new_page_dict[page] = self._pages[page]
+            else:
+                flushed.append((page._page_addr, page._page_size))
 
         self._pages = new_page_dict
         self._initialized = set()
+        return flushed
 
 
 from .. import sim_options as o
