@@ -371,6 +371,8 @@ class SimulationManager:
 
         if step_func is not None:
             return step_func(self)
+        if self.errored:
+            import ipdb; ipdb.set_trace()
         return self
 
     def step_state(self, state, successor_func=None, **run_args):

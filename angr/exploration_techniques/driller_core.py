@@ -16,14 +16,14 @@ class DrillerCore(ExplorationTechnique):
     'diverted' stash.
     """
 
-    def __init__(self, trace, fuzz_bitmap=None):
+    def __init__(self, qemu_trace, fuzz_bitmap=None):
         """
         :param trace      : The basic block trace.
         :param fuzz_bitmap: AFL's bitmap of state transitions. Defaults to saying every transition is worth satisfying.
         """
 
         super(DrillerCore, self).__init__()
-        self.trace = trace
+        self.qemu_trace = qemu_trace
         self.fuzz_bitmap = fuzz_bitmap or b"\xff" * 65536
 
         # Set of encountered basic block transitions.
@@ -33,10 +33,17 @@ class DrillerCore(ExplorationTechnique):
         self.project = simgr._project
 
         # Update encounters with known state transitions.
-        self.encounters.update(zip(self.trace, islice(self.trace, 1, None)))
+        self.encounters.update(zip(self.qemu_trace, islice(self.qemu_trace, 1, None)))
+        simgr.stashes['missed'] = []
 
     def step(self, simgr, stash='active', **kwargs):
         simgr.step(stash=stash, **kwargs)
+
+        all_missed = []
+        for s in simgr.unsat:
+            s.preconstrainer.remove_preconstraints()
+        simgr.move(from_stash='unsat', to_stash='missed', filter_func=lambda s: s.satisfiable())
+        #simgr.drop(stash='unsat')
 
         # Mimic AFL's indexing scheme.
         if 'missed' in simgr.stashes and simgr.missed:
@@ -55,11 +62,11 @@ class DrillerCore(ExplorationTechnique):
                 hit = bool(self.fuzz_bitmap[cur_loc ^ prev_loc] ^ 0xff)
 
                 transition = (prev_addr, state.addr)
-                mapped_to = self.project.loader.find_object_containing(state.addr).binary
+                is_extern = self.project.loader.extern_object.contains_addr(state.addr)
 
                 l.debug("Found %#x -> %#x transition.", transition[0], transition[1])
 
-                if not hit and transition not in self.encounters and not self._has_false(state) and mapped_to != 'cle##externs':
+                if not hit and transition not in self.encounters and not self._has_false(state) and not is_extern:
                     state.preconstrainer.remove_preconstraints()
 
                     if state.satisfiable():
