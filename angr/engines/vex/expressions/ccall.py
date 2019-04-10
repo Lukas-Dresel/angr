@@ -14,6 +14,8 @@ def SimIRExpr_CCall(engine, state, expr):
     call_args = [engine.handle_expression(state, e) for e in expr.args]
 
     if hasattr(ccall, expr.callee.name):
+        if expr.callee.name in {'amd64g_create_fpucw', 'amd64g_check_fldcw', 'amd64g_create_mxcsr', 'amd64g_check_ldmxcsr'}:
+            import ipdb; ipdb.set_trace()
         try:
             func = getattr(ccall, expr.callee.name)
             result, constraints = func(state, *call_args)
@@ -24,6 +26,7 @@ def SimIRExpr_CCall(engine, state, expr):
             state.history.add_event('resilience', resilience_type='ccall', callee=expr.callee.name, message='ccall raised SimCCallError')
             result = state.solver.Unconstrained("errored_%s" % expr.callee.name, get_type_size(expr.ret_type))
     else:
+        import ipdb; ipdb.set_trace()
         l.error("Unsupported CCall %s", expr.callee.name)
         if o.BYPASS_UNSUPPORTED_IRCCALL in state.options:
             if o.UNSUPPORTED_BYPASS_ZERO_DEFAULT in state.options:
