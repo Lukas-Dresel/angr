@@ -76,9 +76,11 @@ class SimStatePreconstrainer(SimStatePlugin):
         :param simfile:     The actual simfile to preconstrain
         """
         repair_entry_state_opts = False
-        if o.TRACK_ACTION_HISTORY in self.state.options:
+        before = self.state.options
+        after = self.state.options - {o.TRACK_ACTION_HISTORY, o.AUTO_REFS}
+        if before != after:
             repair_entry_state_opts = True
-            self.state.options -= {o.TRACK_ACTION_HISTORY}
+            self.state.options = after
 
         if set_length: # disable read bounds
             simfile.has_end = False
@@ -87,7 +89,7 @@ class SimStatePreconstrainer(SimStatePlugin):
         for write in content:
             if type(write) is int:
                 write = bytes([write])
-            data, length, pos = simfile.read(pos, len(write), short_reads=False)
+            data, length, pos = simfile.read(pos, len(write), short_reads=False, )
             if not claripy.is_true(length == len(write)):
                 raise AngrError("Bug in either SimFile or in usage of preconstrainer: couldn't get requested data from file")
             self.preconstrain(write, data)
@@ -100,7 +102,7 @@ class SimStatePreconstrainer(SimStatePlugin):
             simfile.has_end = True
 
         if repair_entry_state_opts:
-            self.state.options |= {o.TRACK_ACTION_HISTORY}
+            self.state.options = before
 
     def preconstrain_flag_page(self, magic_content):
         """
