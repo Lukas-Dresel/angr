@@ -14,8 +14,6 @@ def SimIRExpr_CCall(engine, state, expr):
     call_args = [engine.handle_expression(state, e) for e in expr.args]
 
     if hasattr(ccall, expr.callee.name):
-        if expr.callee.name in {'amd64g_create_fpucw', 'amd64g_check_fldcw', 'amd64g_create_mxcsr', 'amd64g_check_ldmxcsr'}:
-            import ipdb; ipdb.set_trace()
         try:
             func = getattr(ccall, expr.callee.name)
             result, constraints = func(state, *call_args)
