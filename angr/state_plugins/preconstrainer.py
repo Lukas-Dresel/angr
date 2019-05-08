@@ -80,11 +80,6 @@ class SimStatePreconstrainer(SimStatePlugin):
         :param content:     The content to preconstrain the file to. Can be a bytestring or a list thereof.
         :param simfile:     The actual simfile to preconstrain
         """
-        repair_entry_state_opts = False
-        if o.TRACK_ACTION_HISTORY in self.state.options:
-            repair_entry_state_opts = True
-            self.state.options -= {o.TRACK_ACTION_HISTORY}
-
         if set_length: # disable read bounds
             simfile.has_end = False
 
@@ -103,9 +98,6 @@ class SimStatePreconstrainer(SimStatePlugin):
 
         if set_length: # enable read bounds; size is now maximum size
             simfile.has_end = True
-
-        if repair_entry_state_opts:
-            self.state.options |= {o.TRACK_ACTION_HISTORY}
 
     def preconstrain_flag_page(self, magic_content):
         """
