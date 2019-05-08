@@ -1240,7 +1240,7 @@ class SimSymbolicMemory(SimMemory): #pylint:disable=abstract-method
         # if unicorn is in play and we've marked a page writable, it must be uncached
         if permissions is not None and self.state.solver.is_true(permissions & 2 == 2):
             if self.state.has_plugin('unicorn'):
-                p = self.mem._get_page(addr)
+                p = self.mem._get_page(self.mem._page_id(addr))
                 self.state.unicorn.uncache_region(p._page_addr, p._page_size)
         return out
 
